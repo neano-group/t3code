@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  readFileSync,
+  mkdirSync,
+  writeFileSync,
+  lstatSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 import ts from "typescript-legacy";
 
@@ -34,6 +40,7 @@ export function extractImports(filename: string, source: string) {
 }
 
 export function buildGraph(root: string) {
+  root = realpathSync(root);
   const files = execFileSync("git", ["-C", root, "ls-files", "-z"], {
     maxBuffer: 20 * 1024 * 1024,
   })
@@ -54,19 +61,25 @@ export function buildGraph(root: string) {
   let skipped = 0;
   for (const filename of files) {
     const absolute = path.resolve(root, filename);
-    // Git tracks symlinks; never follow one outside the selected repository.
-    const { lstatSync } = process.getBuiltinModule("node:fs");
-    if (
-      !lstatSync(absolute).isFile() ||
-      lstatSync(absolute).size > 1024 * 1024
-    ) {
+    let source: string;
+    try {
+      const relative = path.relative(root, realpathSync(absolute));
+      const stat = lstatSync(absolute);
+      if (
+        relative.startsWith(".." + path.sep) ||
+        path.isAbsolute(relative) ||
+        !stat.isFile() ||
+        stat.size > 1024 * 1024
+      ) {
+        skipped++;
+        continue;
+      }
+      source = readFileSync(absolute, "utf8");
+    } catch {
       skipped++;
       continue;
     }
-    for (const specifier of extractImports(
-      filename,
-      readFileSync(absolute, "utf8"),
-    )) {
+    for (const specifier of extractImports(filename, source)) {
       if (!specifier.startsWith(".")) {
         unresolved++;
         continue;
