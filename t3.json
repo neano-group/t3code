@@ -13,6 +13,11 @@
       "command": "node scripts/setup-worktree.ts",
       "icon": "configure",
       "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Architecture",
+      "command": "vp run architecture",
+      "icon": "build"
     }
   ]
 }
