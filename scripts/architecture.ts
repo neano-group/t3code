@@ -1,21 +1,11 @@
-import { execFileSync } from "node:child_process";
-import {
-  readFileSync,
-  mkdirSync,
-  writeFileSync,
-  lstatSync,
-  realpathSync,
-} from "node:fs";
-import path from "node:path";
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off - Standalone Node CLI scans the local Git worktree synchronously.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import ts from "typescript-legacy";
 
 export function extractImports(filename: string, source: string) {
-  const file = ts.createSourceFile(
-    filename,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-  );
+  const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   const imports: string[] = [];
   function visit(node: ts.Node) {
     if (
@@ -27,8 +17,7 @@ export function extractImports(filename: string, source: string) {
     if (
       ts.isCallExpression(node) &&
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        (ts.isIdentifier(node.expression) &&
-          node.expression.text === "require")) &&
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
       node.arguments[0] &&
       ts.isStringLiteral(node.arguments[0])
     )
@@ -40,16 +29,15 @@ export function extractImports(filename: string, source: string) {
 }
 
 export function buildGraph(root: string) {
-  root = realpathSync(root);
-  const files = execFileSync("git", ["-C", root, "ls-files", "-z"], {
+  root = NodeFS.realpathSync(root);
+  const files = NodeChildProcess.execFileSync("git", ["-C", root, "ls-files", "-z"], {
     maxBuffer: 20 * 1024 * 1024,
   })
     .toString()
     .split("\0")
     .filter(
       (file) =>
-        /\.[cm]?[jt]sx?$/.test(file) &&
-        !/(^|\/)(\.repos|node_modules|dist|vendor)\//.test(file),
+        /\.[cm]?[jt]sx?$/.test(file) && !/(^|\/)(\.repos|node_modules|dist|vendor)\//.test(file),
     );
   const fileSet = new Set(files);
   const nodes = files.map((id) => ({
@@ -60,21 +48,21 @@ export function buildGraph(root: string) {
   let unresolved = 0;
   let skipped = 0;
   for (const filename of files) {
-    const absolute = path.resolve(root, filename);
+    const absolute = NodePath.resolve(root, filename);
     let source: string;
     try {
-      const relative = path.relative(root, realpathSync(absolute));
-      const stat = lstatSync(absolute);
+      const relative = NodePath.relative(root, NodeFS.realpathSync(absolute));
+      const stat = NodeFS.lstatSync(absolute);
       if (
-        relative.startsWith(".." + path.sep) ||
-        path.isAbsolute(relative) ||
+        relative.startsWith(".." + NodePath.sep) ||
+        NodePath.isAbsolute(relative) ||
         !stat.isFile() ||
         stat.size > 1024 * 1024
       ) {
         skipped++;
         continue;
       }
-      source = readFileSync(absolute, "utf8");
+      source = NodeFS.readFileSync(absolute, "utf8");
     } catch {
       skipped++;
       continue;
@@ -84,14 +72,12 @@ export function buildGraph(root: string) {
         unresolved++;
         continue;
       }
-      const base = path.posix.normalize(
-        path.posix.join(path.posix.dirname(filename), specifier),
+      const base = NodePath.posix.normalize(
+        NodePath.posix.join(NodePath.posix.dirname(filename), specifier),
       );
       const candidates = [
         base,
-        ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].map(
-          (ext) => base + ext,
-        ),
+        ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].map((ext) => base + ext),
         ...[".ts", ".tsx", ".js", ".jsx"].map((ext) => base + "/index" + ext),
         base.replace(/\.js$/, ".ts"),
         base.replace(/\.js$/, ".tsx"),
@@ -112,12 +98,12 @@ export function renderGraph(graph: ReturnType<typeof buildGraph>) {
 <script type="module">const graph=${data};const svg=document.querySelector('#map'), search=document.querySelector('#search'), detail=document.querySelector('#detail');const ns='http://www.w3.org/2000/svg';let selected=null,zoom=1;function element(tag,attrs,text){const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(text)e.textContent=text;return e}function choose(id){selected=id;detail.replaceChildren();const h=document.createElement('h2');h.textContent=id;detail.append(h);for(const [label,items] of [['Imports',graph.edges.filter(e=>e.source===id).map(e=>e.target)],['Imported by',graph.edges.filter(e=>e.target===id).map(e=>e.source)]]){const h=document.createElement('h3');h.textContent=label+' ('+items.length+')';detail.append(h);for(const item of items){const a=document.createElement('a');a.href='#';a.textContent=item;a.onclick=e=>{e.preventDefault();choose(item)};detail.append(a)}}draw()}function draw(){let nodes=graph.nodes.filter(n=>n.id.toLowerCase().includes(search.value.toLowerCase()));if(selected){const ids=new Set([selected,...graph.edges.filter(e=>e.source===selected||e.target===selected).flatMap(e=>[e.source,e.target])]);nodes=nodes.filter(n=>ids.has(n.id))}nodes=nodes.slice(0,180);const positions=new Map(nodes.map((n,i)=>[n.id,{x:30+(i%3)*330,y:30+Math.floor(i/3)*85}]));svg.replaceChildren();svg.setAttribute('width',1020*zoom);svg.setAttribute('height',Math.max(500,Math.ceil(nodes.length/3)*85+50)*zoom);svg.setAttribute('viewBox','0 0 1020 '+Math.max(500,Math.ceil(nodes.length/3)*85+50));for(const edge of graph.edges){const a=positions.get(edge.source),b=positions.get(edge.target);if(a&&b)svg.append(element('line',{x1:a.x+145,y1:a.y+25,x2:b.x+145,y2:b.y+25}))}for(const node of nodes){const p=positions.get(node.id),g=element('g',{tabindex:0,role:'button','aria-label':node.id});g.append(element('rect',{x:p.x,y:p.y,width:290,height:55}),element('text',{x:p.x+12,y:p.y+23},node.id.split('/').pop()),element('text',{x:p.x+12,y:p.y+43},node.group));g.onclick=()=>choose(node.id);g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(node.id)}};svg.append(g)}document.querySelector('#status').textContent=graph.nodes.length+' files · '+graph.edges.length+' resolved connections · '+graph.unresolved+' unresolved/package imports · '+graph.skipped+' skipped files · showing '+nodes.length+' (limit 180; search to narrow)'}search.oninput=draw;document.querySelector('#in').onclick=()=>{zoom=Math.min(2,zoom+.2);draw()};document.querySelector('#out').onclick=()=>{zoom=Math.max(.4,zoom-.2);draw()};document.querySelector('#reset').onclick=()=>{selected=null;search.value='';zoom=1;draw()};draw();</script></html>`;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  const root = path.resolve(process.argv[2] ?? ".");
-  const output = path.resolve(process.argv[3] ?? ".t3/architecture.html");
+if (process.argv[1] && NodePath.resolve(process.argv[1]) === import.meta.filename) {
+  const root = NodePath.resolve(process.argv[2] ?? ".");
+  const output = NodePath.resolve(process.argv[3] ?? ".t3/architecture.html");
   const graph = buildGraph(root);
-  mkdirSync(path.dirname(output), { recursive: true });
-  writeFileSync(output, renderGraph(graph));
+  NodeFS.mkdirSync(NodePath.dirname(output), { recursive: true });
+  NodeFS.writeFileSync(output, renderGraph(graph));
   console.log(
     `Architecture: ${output} (${graph.nodes.length} files, ${graph.edges.length} connections)`,
   );
